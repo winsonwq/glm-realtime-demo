@@ -1,0 +1,25 @@
+{
+  "name": "glm-realtime-demo",
+  "version": "1.0.0",
+  "description": "GLM-Realtime 实时语音交互 Demo",
+  "main": "proxy-server.js",
+  "scripts": {
+    "start": "node proxy-server.js",
+    "dev": "nodemon proxy-server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "glm-realtime",
+    "websocket",
+    "voice",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT"
+}
