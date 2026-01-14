@@ -403,6 +403,20 @@
                 <div class="custom-message-container">
                     <div class="custom-message-label">自定义提示词：</div>
                     <textarea id="systemMessage" placeholder="输入自定义系统提示词..."></textarea>
+                    <div id="systemMessageStatus" style="margin-top: 8px; font-size: 12px; color: #666;">
+                        <span id="systemMessageLength">0</span> 字符
+                    </div>
+                </div>
+
+                <div class="custom-message-container" style="margin-top: 20px;">
+                    <div class="custom-message-label">MCP 服务 URL（可选，用于工具调用）：</div>
+                    <input type="text" id="mcpServerUrl" placeholder="https://www.ai-go.cc/api/mcp" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; font-family: inherit;">
+                    <div style="font-size: 12px; color: #999; margin-top: 5px;">留空则禁用工具调用功能</div>
+                    
+                    <div id="toolsStatus" style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 8px; display: none;">
+                        <div style="font-size: 13px; font-weight: 500; color: #333; margin-bottom: 8px;">已加载的工具：</div>
+                        <div id="toolsList" style="font-size: 12px; color: #666; line-height: 1.6;"></div>
+                    </div>
                 </div>
 
                 <div class="modal-actions">
@@ -456,6 +470,10 @@
         const saveBtn = document.getElementById('saveBtn');
         const systemMessageInput = document.getElementById('systemMessage');
         const presetsGrid = document.getElementById('presetsGrid');
+        const mcpServerUrlInput = document.getElementById('mcpServerUrl');
+        const toolsStatus = document.getElementById('toolsStatus');
+        const toolsList = document.getElementById('toolsList');
+        const systemMessageLength = document.getElementById('systemMessageLength');
 
         // 预设的 System Message 选项
         const PRESETS = [
@@ -493,6 +511,7 @@
 
         const DEFAULT_SYSTEM_MESSAGE = PRESETS[0].message;
         let currentPresetId = null;
+        let mcpTools = []; // 存储从 MCP 服务获取的工具定义
 
         // 初始化预设选项
         function initPresets() {
@@ -505,6 +524,24 @@
                 btn.onclick = () => selectPreset(preset.id);
                 presetsGrid.appendChild(btn);
             });
+        }
+
+        // 更新 System Message 长度显示
+        function updateSystemMessageLength() {
+            if (systemMessageLength) {
+                const length = systemMessageInput.value.length;
+                systemMessageLength.textContent = length;
+                if (length === 0) {
+                    systemMessageLength.style.color = '#999';
+                } else {
+                    systemMessageLength.style.color = '#666';
+                }
+            }
+        }
+
+        // 监听 System Message 输入变化
+        if (systemMessageInput) {
+            systemMessageInput.addEventListener('input', updateSystemMessageLength);
         }
 
         // 选择预设
@@ -525,6 +562,7 @@
             // 加载保存的设置
             const savedMessage = localStorage.getItem('system_message');
             const savedPresetId = localStorage.getItem('selected_preset_id');
+            const savedMcpUrl = localStorage.getItem('mcp_server_url');
             
             if (savedMessage) {
                 systemMessageInput.value = savedMessage;
@@ -544,6 +582,19 @@
                 selectPreset(PRESETS[0].id);
             }
             
+            // 加载 MCP URL
+            if (savedMcpUrl) {
+                mcpServerUrlInput.value = savedMcpUrl;
+            } else {
+                mcpServerUrlInput.value = 'https://www.ai-go.cc/api/mcp';
+            }
+            
+            // 更新工具状态显示
+            updateToolsStatus();
+            
+            // 更新 System Message 长度显示
+            updateSystemMessageLength();
+            
             settingsModal.classList.add('show');
         }
 
@@ -553,7 +604,7 @@
         }
 
         // 保存设置
-        function saveSettings() {
+        async function saveSettings() {
             const message = systemMessageInput.value.trim();
             if (!message) {
                 alert('请输入系统提示词');
@@ -567,14 +618,324 @@
                 localStorage.removeItem('selected_preset_id');
             }
             
-            alert('设置已保存！');
+            // 保存 MCP URL 并获取工具定义
+            const mcpUrl = mcpServerUrlInput.value.trim();
+            if (mcpUrl) {
+                localStorage.setItem('mcp_server_url', mcpUrl);
+                try {
+                    await loadMcpTools(mcpUrl);
+                    alert('设置已保存！MCP 工具已加载。');
+                } catch (error) {
+                    console.error('加载 MCP 工具失败:', error);
+                    alert('设置已保存，但 MCP 工具加载失败：' + error.message);
+                }
+            } else {
+                localStorage.removeItem('mcp_server_url');
+                mcpTools = [];
+                alert('设置已保存！');
+            }
+            
             closeModal();
+        }
+
+        // 从 MCP 服务获取工具定义
+        async function loadMcpTools(mcpUrl) {
+            try {
+                console.log('📡 正在从 MCP 服务获取工具定义:', mcpUrl);
+                // 通过代理服务器获取，避免 CORS 问题
+                const response = await fetch('http://localhost:3000/api/mcp-proxy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: mcpUrl
+                        // GET 请求不需要 data
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const mcpInfo = await response.json();
+                console.log('✅ MCP 服务信息:', mcpInfo);
+                
+                if (mcpInfo.tools && Array.isArray(mcpInfo.tools)) {
+                    mcpTools = mcpInfo.tools.map(tool => {
+                        // 转换 MCP 工具格式为 GLM-Realtime 格式
+                        let parameters = tool.inputSchema || tool.parameters || {};
+                        
+                        // 如果没有 parameters，根据工具名称创建基本 schema
+                        if (!parameters || Object.keys(parameters).length === 0) {
+                            parameters = createDefaultSchema(tool.name);
+                        }
+                        
+                        // 确保 parameters 符合 JSON Schema 格式
+                        if (!parameters.type) {
+                            parameters = {
+                                type: 'object',
+                                properties: parameters.properties || {},
+                                required: parameters.required || []
+                            };
+                        }
+                        
+                        return {
+                            type: 'function',
+                            name: tool.name,
+                            description: tool.description || `调用 ${tool.name} 工具`,
+                            parameters: parameters
+                        };
+                    });
+                    console.log('✅ 已加载 MCP 工具:', mcpTools);
+                    console.log('📋 工具详情:', JSON.stringify(mcpTools, null, 2));
+                    updateToolsStatus();
+                } else {
+                    throw new Error('MCP 服务返回的工具格式不正确');
+                }
+            } catch (error) {
+                console.error('❌ 加载 MCP 工具失败:', error);
+                mcpTools = [];
+                updateToolsStatus();
+                throw error;
+            }
+        }
+
+        // 根据工具名称创建默认的 JSON Schema
+        function createDefaultSchema(toolName) {
+            const schemas = {
+                'get_gitlab_commit_diff': {
+                    type: 'object',
+                    properties: {
+                        commit_id: {
+                            type: 'string',
+                            description: 'GitLab commit ID'
+                        }
+                    },
+                    required: ['commit_id']
+                },
+                'send_feishu_message': {
+                    type: 'object',
+                    properties: {
+                        webhookUrl: {
+                            type: 'string',
+                            description: '飞书机器人 Webhook URL（必填）'
+                        },
+                        webhook_url: {
+                            type: 'string',
+                            description: '飞书机器人 Webhook URL（必填，与 webhookUrl 等效）'
+                        },
+                        title: {
+                            type: 'string',
+                            description: '消息标题（必填）'
+                        },
+                        content: {
+                            type: 'string',
+                            description: '消息内容（必填）'
+                        }
+                    },
+                    required: ['title', 'content'],
+                    // 注意：webhookUrl 和 webhook_url 至少需要一个
+                    anyOf: [
+                        { required: ['webhookUrl'] },
+                        { required: ['webhook_url'] }
+                    ]
+                }
+            };
+            
+            return schemas[toolName] || {
+                type: 'object',
+                properties: {},
+                required: []
+            };
+        }
+
+        // 获取 MCP 服务 URL
+        function getMcpServerUrl() {
+            return localStorage.getItem('mcp_server_url') || '';
+        }
+
+        // 更新工具状态显示
+        function updateToolsStatus() {
+            if (mcpTools.length > 0) {
+                toolsStatus.style.display = 'block';
+                toolsList.innerHTML = mcpTools.map(tool => 
+                    `<div style="margin-bottom: 6px;">
+                        <span style="color: #2196F3; font-weight: 500;">🔧 ${tool.name}</span>
+                        <span style="color: #999; margin-left: 8px;">${tool.description || '无描述'}</span>
+                    </div>`
+                ).join('');
+            } else {
+                toolsStatus.style.display = 'none';
+            }
         }
 
         // 获取当前系统消息
         function getCurrentSystemMessage() {
             const savedMessage = localStorage.getItem('system_message');
             return savedMessage || DEFAULT_SYSTEM_MESSAGE;
+        }
+
+        // 处理函数调用
+        async function handleFunctionCall(functionName, argumentsJson, responseId) {
+            try {
+                const mcpUrl = getMcpServerUrl();
+                if (!mcpUrl) {
+                    console.error('❌ MCP 服务 URL 未配置');
+                    return;
+                }
+
+                // 解析函数参数
+                let args;
+                try {
+                    args = typeof argumentsJson === 'string' ? JSON.parse(argumentsJson) : argumentsJson;
+                } catch (e) {
+                    console.error('❌ 解析函数参数失败:', e);
+                    args = {};
+                }
+
+                // 参数标准化：处理 webhook_url 和 webhookUrl 的兼容性
+                if (functionName === 'send_feishu_message') {
+                    if (args.webhook_url && !args.webhookUrl) {
+                        args.webhookUrl = args.webhook_url;
+                    } else if (args.webhookUrl && !args.webhook_url) {
+                        args.webhook_url = args.webhookUrl;
+                    }
+                }
+
+                console.log('📞 调用 MCP 工具:', functionName, '参数:', args);
+                console.log('📋 参数详情:', JSON.stringify(args, null, 2));
+                updateStatus(`正在调用工具: ${functionName}...`, 'recording');
+
+                // 调用 MCP 服务 - 通过代理服务器，避免 CORS 问题
+                let requestData;
+                try {
+                    // 首先尝试 JSON-RPC 2.0 格式
+                    requestData = {
+                        jsonrpc: '2.0',
+                        id: generateEventId(),
+                        method: 'tools/call',
+                        params: {
+                            name: functionName,
+                            arguments: args
+                        }
+                    };
+                } catch (e) {
+                    // 如果失败，使用简单格式
+                    requestData = {
+                        tool: functionName,
+                        arguments: args
+                    };
+                }
+
+                const response = await fetch('http://localhost:3000/api/mcp-proxy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: mcpUrl,
+                        data: requestData
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const jsonRpcResponse = await response.json();
+                
+                // 处理 JSON-RPC 响应
+                let result;
+                if (jsonRpcResponse.error) {
+                    // 提取错误信息
+                    const errorMsg = jsonRpcResponse.error.message || jsonRpcResponse.error || 'MCP 服务返回错误';
+                    const errorCode = jsonRpcResponse.error.code;
+                    console.error('❌ MCP 工具调用错误:', errorMsg, '错误代码:', errorCode);
+                    throw new Error(errorMsg);
+                } else if (jsonRpcResponse.result) {
+                    result = jsonRpcResponse.result;
+                } else {
+                    // 如果不是标准 JSON-RPC 格式，检查是否包含错误信息
+                    if (jsonRpcResponse.error || jsonRpcResponse.message) {
+                        const errorMsg = jsonRpcResponse.error || jsonRpcResponse.message || '未知错误';
+                        console.error('❌ MCP 工具调用错误:', errorMsg);
+                        throw new Error(errorMsg);
+                    }
+                    // 直接使用响应
+                    result = jsonRpcResponse;
+                }
+
+                console.log('✅ MCP 工具调用结果:', result);
+
+                // 将结果发送回模型
+                const functionOutput = {
+                    event_id: generateEventId(),
+                    client_timestamp: Date.now(),
+                    type: "conversation.item.create",
+                    item: {
+                        object: "realtime.item",
+                        type: "function_call_output",
+                        output: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+                    }
+                };
+
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify(functionOutput));
+                    console.log('📤 已将函数调用结果发送回模型');
+                    addDebugEvent('function_result_sent', { name: functionName });
+                    updateStatus('工具调用完成', 'connected');
+                } else {
+                    console.error('❌ WebSocket 未连接，无法发送函数调用结果');
+                }
+            } catch (error) {
+                console.error('❌ 函数调用失败:', error);
+                console.error('错误详情:', {
+                    functionName: functionName,
+                    arguments: args,
+                    errorMessage: error.message,
+                    errorStack: error.stack
+                });
+                addDebugEvent('function_call_error', { 
+                    name: functionName, 
+                    error: error.message,
+                    arguments: args
+                });
+                updateStatus('工具调用失败: ' + error.message, 'error');
+                
+                // 构建友好的错误信息，帮助模型理解问题
+                let errorMessage = error.message;
+                
+                // 如果是参数缺失错误，提供更详细的说明
+                if (errorMessage.includes('必填参数') || errorMessage.includes('required')) {
+                    const tool = mcpTools.find(t => t.name === functionName);
+                    if (tool && tool.parameters && tool.parameters.required) {
+                        errorMessage = `调用工具 ${functionName} 失败：缺少必填参数。需要的参数包括：${tool.parameters.required.join('、')}。请确保提供所有必填参数后再重试。`;
+                    }
+                }
+                
+                // 发送错误结果回模型，使用更友好的格式
+                const errorOutput = {
+                    event_id: generateEventId(),
+                    client_timestamp: Date.now(),
+                    type: "conversation.item.create",
+                    item: {
+                        object: "realtime.item",
+                        type: "function_call_output",
+                        output: JSON.stringify({ 
+                            success: false,
+                            error: errorMessage,
+                            tool: functionName,
+                            message: `工具调用失败：${errorMessage}。请检查参数是否完整，然后重试。`
+                        }, null, 2)
+                    }
+                };
+
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify(errorOutput));
+                    console.log('📤 已将错误信息发送回模型:', errorMessage);
+                } else {
+                    console.error('❌ WebSocket 未连接，无法发送错误信息');
+                }
+            }
         }
 
         // 事件绑定
@@ -592,6 +953,19 @@
 
         // 初始化
         initPresets();
+        
+        // 页面加载时尝试加载 MCP 工具
+        window.addEventListener('load', async () => {
+            const mcpUrl = getMcpServerUrl();
+            if (mcpUrl) {
+                try {
+                    await loadMcpTools(mcpUrl);
+                    console.log('✅ 页面加载时已自动加载 MCP 工具');
+                } catch (error) {
+                    console.warn('⚠️ 页面加载时 MCP 工具加载失败:', error);
+                }
+            }
+        });
 
         // 生成事件ID
         function generateEventId() {
@@ -776,6 +1150,55 @@
             switch (data.type) {
                 case "session.created":
                     console.log("✅ 会话已创建");
+                    console.log("📋 服务器确认的会话配置:", JSON.stringify(data.session, null, 2));
+                    
+                    // 检查 system message (instructions) 是否被正确设置
+                    const expectedInstructions = getCurrentSystemMessage();
+                    const serverInstructions = data.session?.instructions || '';
+                    
+                    if (serverInstructions) {
+                        if (serverInstructions === expectedInstructions) {
+                            console.log("✅ System Message 已正确设置");
+                            console.log("📝 System Message 内容:", serverInstructions.substring(0, 100) + (serverInstructions.length > 100 ? '...' : ''));
+                            addDebugEvent('system_message_confirmed', { 
+                                length: serverInstructions.length,
+                                preview: serverInstructions.substring(0, 50) + '...'
+                            });
+                        } else {
+                            console.warn("⚠️ System Message 内容不匹配");
+                            console.warn("   期望:", expectedInstructions.substring(0, 100) + '...');
+                            console.warn("   实际:", serverInstructions.substring(0, 100) + '...');
+                            addDebugEvent('system_message_mismatch', { 
+                                expectedLength: expectedInstructions.length,
+                                actualLength: serverInstructions.length
+                            });
+                        }
+                    } else {
+                        console.error("❌ 服务器会话配置中未找到 instructions 字段");
+                        console.error("   期望的 System Message:", expectedInstructions.substring(0, 100) + '...');
+                        addDebugEvent('system_message_missing', { 
+                            expectedLength: expectedInstructions.length
+                        });
+                    }
+                    
+                    // 检查工具是否被正确设置
+                    if (data.session && data.session.tools) {
+                        console.log("✅ 服务器已确认接收工具配置，工具数量:", data.session.tools.length);
+                        data.session.tools.forEach((tool, index) => {
+                            console.log(`  工具 ${index + 1}: ${tool.name} - ${tool.description || '无描述'}`);
+                        });
+                        addDebugEvent('tools_confirmed', { 
+                            count: data.session.tools.length,
+                            tools: data.session.tools.map(t => t.name)
+                        });
+                    } else {
+                        console.warn("⚠️ 服务器会话配置中未找到 tools 字段");
+                        if (mcpTools.length > 0) {
+                            console.warn("⚠️ 本地已加载工具但服务器未确认，可能配置失败");
+                            addDebugEvent('tools_missing', { localCount: mcpTools.length });
+                        }
+                    }
+                    
                     // 清除超时检测
                     if (sessionConfigTimeout) {
                         clearTimeout(sessionConfigTimeout);
@@ -789,6 +1212,55 @@
 
                 case "session.updated":
                     console.log("✅ 会话已更新");
+                    console.log("📋 服务器确认的会话配置:", JSON.stringify(data.session, null, 2));
+                    
+                    // 检查 system message (instructions) 是否被正确设置
+                    const expectedInstructionsUpdated = getCurrentSystemMessage();
+                    const serverInstructionsUpdated = data.session?.instructions || '';
+                    
+                    if (serverInstructionsUpdated) {
+                        if (serverInstructionsUpdated === expectedInstructionsUpdated) {
+                            console.log("✅ System Message 已正确更新");
+                            console.log("📝 System Message 内容:", serverInstructionsUpdated.substring(0, 100) + (serverInstructionsUpdated.length > 100 ? '...' : ''));
+                            addDebugEvent('system_message_confirmed', { 
+                                length: serverInstructionsUpdated.length,
+                                preview: serverInstructionsUpdated.substring(0, 50) + '...'
+                            });
+                        } else {
+                            console.warn("⚠️ System Message 内容不匹配");
+                            console.warn("   期望:", expectedInstructionsUpdated.substring(0, 100) + '...');
+                            console.warn("   实际:", serverInstructionsUpdated.substring(0, 100) + '...');
+                            addDebugEvent('system_message_mismatch', { 
+                                expectedLength: expectedInstructionsUpdated.length,
+                                actualLength: serverInstructionsUpdated.length
+                            });
+                        }
+                    } else {
+                        console.error("❌ 服务器会话配置中未找到 instructions 字段");
+                        console.error("   期望的 System Message:", expectedInstructionsUpdated.substring(0, 100) + '...');
+                        addDebugEvent('system_message_missing', { 
+                            expectedLength: expectedInstructionsUpdated.length
+                        });
+                    }
+                    
+                    // 检查工具是否被正确设置
+                    if (data.session && data.session.tools) {
+                        console.log("✅ 服务器已确认接收工具配置，工具数量:", data.session.tools.length);
+                        data.session.tools.forEach((tool, index) => {
+                            console.log(`  工具 ${index + 1}: ${tool.name} - ${tool.description || '无描述'}`);
+                        });
+                        addDebugEvent('tools_confirmed', { 
+                            count: data.session.tools.length,
+                            tools: data.session.tools.map(t => t.name)
+                        });
+                    } else {
+                        console.warn("⚠️ 服务器会话配置中未找到 tools 字段");
+                        if (mcpTools.length > 0) {
+                            console.warn("⚠️ 本地已加载工具但服务器未确认，可能配置失败");
+                            addDebugEvent('tools_missing', { localCount: mcpTools.length });
+                        }
+                    }
+                    
                     // 清除超时检测
                     if (sessionConfigTimeout) {
                         clearTimeout(sessionConfigTimeout);
@@ -879,6 +1351,13 @@
                     if (window.responseTimeout) {
                         clearTimeout(window.responseTimeout);
                     }
+                    break;
+
+                case "response.function_call_arguments.done":
+                    console.log("🔧 AI 请求调用函数:", data.name, "参数:", data.arguments);
+                    addDebugEvent('function_call', { name: data.name, arguments: data.arguments });
+                    // 处理函数调用
+                    handleFunctionCall(data.name, data.arguments, data.response_id);
                     break;
 
                 case "response.done":
@@ -1171,8 +1650,18 @@
         }
 
         // 发送会话配置（根据官方文档格式）
-        function sendSessionUpdate() {
+        async function sendSessionUpdate() {
             if (socket && socket.readyState === WebSocket.OPEN) {
+                // 如果有 MCP URL，尝试加载工具
+                const mcpUrl = getMcpServerUrl();
+                if (mcpUrl && mcpTools.length === 0) {
+                    try {
+                        await loadMcpTools(mcpUrl);
+                    } catch (error) {
+                        console.warn('⚠️ 加载 MCP 工具失败，将不使用工具调用:', error);
+                    }
+                }
+
                 const sessionConfig = {
                     event_id: generateEventId(),
                     client_timestamp: Date.now(),
@@ -1204,13 +1693,39 @@
                     }
                 };
 
-                console.log("📤 发送会话配置:", JSON.stringify(sessionConfig, null, 2));
+                // 如果有 MCP 工具，添加到 session 配置中
+                if (mcpTools.length > 0) {
+                    sessionConfig.session.tools = mcpTools;
+                    console.log('🔧 已添加 MCP 工具到会话配置');
+                    console.log('📋 工具列表:', mcpTools.map(t => `${t.name} (${t.description || '无描述'})`).join(', '));
+                    console.log('📋 完整工具配置:', JSON.stringify(mcpTools, null, 2));
+                    addDebugEvent('tools_added', { 
+                        count: mcpTools.length,
+                        tools: mcpTools.map(t => t.name)
+                    });
+                } else {
+                    console.log('ℹ️ 未配置 MCP 工具，会话将不使用工具调用功能');
+                }
+
+                // 验证发送的配置
+                const instructionsToSend = sessionConfig.session.instructions;
+                console.log("📤 发送会话配置");
+                console.log("📝 System Message 内容:", instructionsToSend.substring(0, 100) + (instructionsToSend.length > 100 ? '...' : ''));
+                console.log("📝 System Message 长度:", instructionsToSend.length, "字符");
+                console.log("📋 完整会话配置:", JSON.stringify(sessionConfig, null, 2));
+                
                 try {
                     socket.send(JSON.stringify(sessionConfig));
                     console.log("✅ 会话配置已发送");
+                    addDebugEvent('session_config_sent', { 
+                        instructionsLength: instructionsToSend.length,
+                        hasTools: (sessionConfig.session.tools && sessionConfig.session.tools.length > 0),
+                        toolsCount: sessionConfig.session.tools ? sessionConfig.session.tools.length : 0
+                    });
                 } catch (error) {
                     console.error("❌ 发送会话配置失败:", error);
                     updateStatus('发送会话配置失败: ' + error.message, 'error');
+                    addDebugEvent('session_config_error', { error: error.message });
                 }
             } else {
                 console.error("❌ WebSocket 未连接，无法发送会话配置。状态:", socket?.readyState);

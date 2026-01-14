@@ -168,6 +168,121 @@ server.on('request', (req, res) => {
     const parsedUrl = url.parse(req.url);
     let pathname = parsedUrl.pathname;
 
+    // 处理 CORS 预检请求
+    if (req.method === 'OPTIONS') {
+        res.writeHead(200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '86400'
+        });
+        res.end();
+        return;
+    }
+
+    // 代理 MCP 服务请求
+    if (pathname === '/api/mcp-proxy') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            // 从请求中获取 MCP 服务 URL
+            let mcpUrl;
+            let requestData;
+            try {
+                if (body) {
+                    const request = JSON.parse(body);
+                    mcpUrl = request.url;
+                    requestData = request.data;
+                } else {
+                    // GET 请求可能没有 body
+                    const query = url.parse(req.url, true).query;
+                    mcpUrl = query.url;
+                }
+            } catch (e) {
+                res.writeHead(400, { 
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                res.end(JSON.stringify({ error: 'Invalid request format: ' + e.message }));
+                return;
+            }
+
+            if (!mcpUrl) {
+                res.writeHead(400, { 
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                res.end(JSON.stringify({ error: 'MCP URL is required' }));
+                return;
+            }
+
+            console.log('🔄 代理 MCP 请求:', mcpUrl, requestData ? '(POST)' : '(GET)');
+
+            // 转发请求到 MCP 服务
+            try {
+                const urlObj = new URL(mcpUrl);
+                const https = require('https');
+                const http = require('http');
+                const protocol = urlObj.protocol === 'https:' ? https : http;
+                
+                const options = {
+                    hostname: urlObj.hostname,
+                    port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+                    path: urlObj.pathname + urlObj.search,
+                    method: requestData ? 'POST' : 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'MCP-Proxy/1.0'
+                    }
+                };
+
+                if (requestData) {
+                    const requestBody = JSON.stringify(requestData);
+                    options.headers['Content-Length'] = Buffer.byteLength(requestBody);
+                }
+
+                const proxyReq = protocol.request(options, (proxyRes) => {
+                    let responseData = '';
+                    proxyRes.on('data', (chunk) => {
+                        responseData += chunk;
+                    });
+                    proxyRes.on('end', () => {
+                        res.writeHead(proxyRes.statusCode || 200, {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*'
+                        });
+                        res.end(responseData);
+                        console.log('✅ MCP 代理响应成功');
+                    });
+                });
+
+                proxyReq.on('error', (error) => {
+                    console.error('❌ MCP 代理请求错误:', error);
+                    res.writeHead(500, { 
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    });
+                    res.end(JSON.stringify({ error: error.message }));
+                });
+
+                if (requestData) {
+                    proxyReq.write(JSON.stringify(requestData));
+                }
+                proxyReq.end();
+            } catch (error) {
+                console.error('❌ MCP URL 解析错误:', error);
+                res.writeHead(400, { 
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                res.end(JSON.stringify({ error: 'Invalid URL: ' + error.message }));
+            }
+        });
+        return;
+    }
+
     // 根路径重定向到 index.html
     if (pathname === '/') {
         res.writeHead(302, { 'Location': '/index.html' });
