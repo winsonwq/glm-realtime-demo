@@ -88,6 +88,214 @@
             gap: 10px;
         }
 
+        .settings-btn {
+            background: #f0f2f5;
+            color: #333;
+            padding: 8px 16px;
+            font-size: 14px;
+            flex: none;
+            width: auto;
+        }
+
+        .settings-btn:hover {
+            background: #e4e6e9;
+        }
+
+        /* 模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.3s;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 20px;
+            color: #333;
+            margin: 0;
+        }
+
+        .close-btn {
+            background: transparent;
+            border: none;
+            font-size: 28px;
+            color: #999;
+            cursor: pointer;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            max-width: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: background-color 0.2s, color 0.2s;
+            line-height: 1;
+            user-select: none;
+            flex: 0 0 40px;
+        }
+
+        .close-btn:hover {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .close-btn:active {
+            background: #e0e0e0;
+        }
+
+        .presets-container {
+            margin-bottom: 20px;
+        }
+
+        .presets-title {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .presets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .preset-btn {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            text-align: center;
+            transition: all 0.2s;
+            color: #333;
+        }
+
+        .preset-btn:hover {
+            background: #e9ecef;
+            border-color: #667eea;
+        }
+
+        .preset-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .custom-message-container {
+            margin-top: 20px;
+        }
+
+        .custom-message-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        #systemMessage {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+
+        #systemMessage:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .modal-btn {
+            padding: 10px 24px;
+            font-size: 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .modal-btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .modal-btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .modal-btn-secondary {
+            background: #f0f2f5;
+            color: #333;
+        }
+
+        .modal-btn-secondary:hover {
+            background: #e4e6e9;
+        }
+
         button {
             flex: 1;
             padding: 12px 24px;
@@ -173,6 +381,34 @@
             <div class="button-group">
                 <button id="startBtn">开始学习模式</button>
                 <button id="stopBtn" disabled>停止</button>
+                <button class="settings-btn" id="settingsBtn">⚙️ 设置</button>
+            </div>
+        </div>
+
+        <!-- 设置模态框 -->
+        <div class="modal" id="settingsModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>⚙️ 系统提示词设置</h3>
+                    <button class="close-btn" id="closeModalBtn" type="button" aria-label="关闭">×</button>
+                </div>
+                
+                <div class="presets-container">
+                    <div class="presets-title">预设风格：</div>
+                    <div class="presets-grid" id="presetsGrid">
+                        <!-- 预设选项将通过 JavaScript 动态生成 -->
+                    </div>
+                </div>
+
+                <div class="custom-message-container">
+                    <div class="custom-message-label">自定义提示词：</div>
+                    <textarea id="systemMessage" placeholder="输入自定义系统提示词..."></textarea>
+                </div>
+
+                <div class="modal-actions">
+                    <button class="modal-btn modal-btn-secondary" id="cancelBtn">取消</button>
+                    <button class="modal-btn modal-btn-primary" id="saveBtn">保存</button>
+                </div>
             </div>
         </div>
 
@@ -213,6 +449,149 @@
         const stopBtn = document.getElementById('stopBtn');
         const statusText = document.getElementById('status');
         const vBar = document.getElementById('v-bar');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsModal = document.getElementById('settingsModal');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const systemMessageInput = document.getElementById('systemMessage');
+        const presetsGrid = document.getElementById('presetsGrid');
+
+        // 预设的 System Message 选项
+        const PRESETS = [
+            {
+                id: 'gentle_tutor',
+                name: '温柔助教',
+                message: '你是一个温柔的学习助教，随时准备回答问题。如果我打断你，请立即停止讲解并听我说。'
+            },
+            {
+                id: 'strict_teacher',
+                name: '严格老师',
+                message: '你是一位严格的老师，对学生要求很高。你会指出学生的错误，并给出建设性的批评。回答问题时要专业、准确，不要过于温和。'
+            },
+            {
+                id: 'friendly_friend',
+                name: '友好伙伴',
+                message: '你是一个友好的学习伙伴，像朋友一样轻松地交流。用简单易懂的语言解释复杂概念，保持轻松愉快的氛围。'
+            },
+            {
+                id: 'socratic_guide',
+                name: '苏格拉底式',
+                message: '你采用苏格拉底式教学法，通过提问引导学生思考，而不是直接给出答案。鼓励学生自己发现问题的解决方案。'
+            },
+            {
+                id: 'technical_expert',
+                name: '技术专家',
+                message: '你是一位技术专家，擅长深入分析技术问题。回答时要详细、准确，提供代码示例和最佳实践。'
+            },
+            {
+                id: 'creative_coach',
+                name: '创意教练',
+                message: '你是一位创意教练，鼓励创新思维和发散性思考。帮助学习者从不同角度看待问题，激发创造力。'
+            }
+        ];
+
+        const DEFAULT_SYSTEM_MESSAGE = PRESETS[0].message;
+        let currentPresetId = null;
+
+        // 初始化预设选项
+        function initPresets() {
+            presetsGrid.innerHTML = '';
+            PRESETS.forEach(preset => {
+                const btn = document.createElement('button');
+                btn.className = 'preset-btn';
+                btn.textContent = preset.name;
+                btn.dataset.presetId = preset.id;
+                btn.onclick = () => selectPreset(preset.id);
+                presetsGrid.appendChild(btn);
+            });
+        }
+
+        // 选择预设
+        function selectPreset(presetId) {
+            currentPresetId = presetId;
+            const preset = PRESETS.find(p => p.id === presetId);
+            if (preset) {
+                systemMessageInput.value = preset.message;
+                // 更新按钮状态
+                document.querySelectorAll('.preset-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.presetId === presetId);
+                });
+            }
+        }
+
+        // 打开模态框
+        function openModal() {
+            // 加载保存的设置
+            const savedMessage = localStorage.getItem('system_message');
+            const savedPresetId = localStorage.getItem('selected_preset_id');
+            
+            if (savedMessage) {
+                systemMessageInput.value = savedMessage;
+                // 检查是否是预设
+                const matchingPreset = PRESETS.find(p => p.message === savedMessage);
+                if (matchingPreset) {
+                    selectPreset(matchingPreset.id);
+                } else {
+                    currentPresetId = null;
+                    document.querySelectorAll('.preset-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                }
+            } else {
+                // 使用默认预设
+                systemMessageInput.value = DEFAULT_SYSTEM_MESSAGE;
+                selectPreset(PRESETS[0].id);
+            }
+            
+            settingsModal.classList.add('show');
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            settingsModal.classList.remove('show');
+        }
+
+        // 保存设置
+        function saveSettings() {
+            const message = systemMessageInput.value.trim();
+            if (!message) {
+                alert('请输入系统提示词');
+                return;
+            }
+            
+            localStorage.setItem('system_message', message);
+            if (currentPresetId) {
+                localStorage.setItem('selected_preset_id', currentPresetId);
+            } else {
+                localStorage.removeItem('selected_preset_id');
+            }
+            
+            alert('设置已保存！');
+            closeModal();
+        }
+
+        // 获取当前系统消息
+        function getCurrentSystemMessage() {
+            const savedMessage = localStorage.getItem('system_message');
+            return savedMessage || DEFAULT_SYSTEM_MESSAGE;
+        }
+
+        // 事件绑定
+        settingsBtn.onclick = openModal;
+        closeModalBtn.onclick = closeModal;
+        cancelBtn.onclick = closeModal;
+        saveBtn.onclick = saveSettings;
+
+        // 点击模态框外部关闭
+        settingsModal.onclick = (e) => {
+            if (e.target === settingsModal) {
+                closeModal();
+            }
+        };
+
+        // 初始化
+        initPresets();
 
         // 生成事件ID
         function generateEventId() {
@@ -801,7 +1180,7 @@
                     session: {
                         model: "glm-realtime",  // 默认模型，也可以使用 glm-realtime-flash 或 glm-realtime-air
                         modalities: ["text", "audio"],
-                        instructions: "你是一个温柔的学习助教，随时准备回答问题。如果我打断你，请立即停止讲解并听我说。",
+                        instructions: getCurrentSystemMessage(),
                         voice: "tongtong",  // 默认女声，可选：xiaochen, tongtong, female-tianmei 等
                         input_audio_format: "pcm16",  // PCM16，采样率16000（实时流式传输使用 PCM）
                         output_audio_format: "pcm",   // 输出 PCM，采样率24kHz
