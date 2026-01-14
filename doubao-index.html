@@ -394,7 +394,7 @@
 </head>
 <body>
     <div class="container">
-        <h2>AI 助教实时交互 <span class="model-badge">豆包模型</span></h2>
+        <h2>AI 助教实时交互 <span class="model-badge">豆包 O2.0</span></h2>
         <div id="status" class="status">状态: 等待连接...</div>
         
         <div class="controls">
@@ -441,6 +441,11 @@
 
         <div class="asr-text" id="asrText">
             <strong>👂 识别到的语音：</strong> <span id="asrContent">-</span>
+        </div>
+
+        <div class="chat-input-container" id="chatInputContainer" style="display: none; margin-top: 15px; width: 100%; gap: 10px;">
+            <input type="text" id="textInput" placeholder="输入文字 prompt..." style="flex: 1; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;">
+            <button id="sendTextBtn" style="flex: none; width: auto; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 500;">发送</button>
         </div>
 
         <div class="chat-text" id="chatText">
@@ -491,6 +496,9 @@
         const systemMessageLength = document.getElementById('systemMessageLength');
         const asrContent = document.getElementById('asrContent');
         const chatContent = document.getElementById('chatContent');
+        const chatInputContainer = document.getElementById('chatInputContainer');
+        const textInput = document.getElementById('textInput');
+        const sendTextBtn = document.getElementById('sendTextBtn');
 
         const PRESETS = [
             {
@@ -663,7 +671,7 @@
                         type: 'start_session',
                         sessionId: currentSessionId,
                         systemMessage: getCurrentSystemMessage(),
-                        model: 'O'
+                        model: 'O2.0'
                     }));
                 };
 
@@ -717,10 +725,14 @@
 
             switch (data.type) {
                 case 'session_started':
-                    console.log("✅ 会话已创建");
+                    console.log("✅ 会话已创建", data.debug_config);
                     updateStatus('会话已创建，请开始说话', 'connected');
+                    if (data.debug_config) {
+                        addDebugEvent('session_config', data.debug_config);
+                    }
                     startBtn.disabled = true;
                     stopBtn.disabled = false;
+                    chatInputContainer.style.display = 'flex';
                     // 重置状态
                     currentChatText = '';
                     audioQueue = [];
@@ -938,6 +950,20 @@
             }
         }
 
+        function sendTextPrompt() {
+            const text = textInput.value.trim();
+            if (!text) return;
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'text_input',
+                    text: text
+                }));
+                textInput.value = '';
+                addDebugEvent('send_text', { text });
+            }
+        }
+
         function stopRecording() {
             isRecording = false;
             
@@ -1002,6 +1028,11 @@
 
         startBtn.onclick = startSession;
         stopBtn.onclick = stopSession;
+
+        sendTextBtn.onclick = sendTextPrompt;
+        textInput.onkeypress = (e) => {
+            if (e.key === 'Enter') sendTextPrompt();
+        };
 
         // 初始化
         initPresets();

@@ -24,7 +24,9 @@ git commit -m "Add system message settings UI and MCP tools integration"
 git push
 ```
 
-## Doubao Realtime Voice Model
+### Doubao Realtime Voice Model
+
+> **Note**: Currently, the Doubao Realtime API does NOT support tool calling (MCP).
 
 ### Reference Documentation
 - Realtime API: https://www.volcengine.com/docs/6893/1527770
@@ -43,6 +45,3 @@ npm run doubao
 # Or start with nodemon for development
 npm run doubao:dev
 ```
-
-### Recent Commits
-- Add Doubao realtime voice API support with WebSocket proxy server

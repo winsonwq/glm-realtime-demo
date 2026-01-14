@@ -297,6 +297,8 @@ wss.on('connection', (clientWs, req) => {
     let sessionId = null;
     let currentSequence = 0;
     let connectionEstablished = false;
+    let currentSystemMessage = null;
+    let currentModel = null;
     let pendingSystemMessage = null;
     let pendingModel = null;
     let connectionStartTime = Date.now();
@@ -357,7 +359,7 @@ wss.on('connection', (clientWs, req) => {
         }
     }
     
-    function sendStartSession(systemMessage, model = 'O') {
+    function sendStartSession(systemMessage, model = 'O2.0') {
         const sessionConfig = {
             asr: {
                 extra: {
@@ -375,8 +377,10 @@ wss.on('connection', (clientWs, req) => {
                 }
             },
             dialog: {
+                model: model, // 注入模型版本
                 bot_name: '豆包',
                 system_role: systemMessage,
+                instructions: systemMessage, // 同时发送 instructions 以防万一
                 speaking_style: '',
                 dialog_id: '',
                 extra: {
@@ -399,6 +403,33 @@ wss.on('connection', (clientWs, req) => {
         );
         
         console.log('📤 发送 StartSession (eventId: 100)');
+        console.log('  - Config:', JSON.stringify(sessionConfig, null, 2));
+        serverWs.send(msg);
+    }
+
+    function sendTextTaskRequest(text) {
+        if (!sessionId) return;
+        
+        // 尝试多种可能的字段名以提高兼容性
+        const payload = {
+            text: text,
+            input_text: text,
+            input_mod: 'text',
+            input_mode: 'text'
+        };
+        
+        const msg = encodeMessage(
+            MESSAGE_TYPES.FULL_CLIENT_REQUEST,
+            0b0100,  // hasEvent
+            payload,
+            EVENT_IDS.TASK_REQUEST,
+            sessionId,
+            null,
+            null,
+            true
+        );
+        
+        console.log('📤 发送文字 TaskRequest (eventId: 200)');
         serverWs.send(msg);
     }
 
@@ -476,7 +507,11 @@ wss.on('connection', (clientWs, req) => {
                     console.log('📥 收到开始会话请求');
                     sessionId = msg.sessionId || `session_${Date.now()}`;
                     pendingSystemMessage = msg.systemMessage || '你是一个友好的AI助手';
-                    pendingModel = msg.model || 'O';
+                    pendingModel = msg.model || 'O2.0';
+                    
+                    // 记录当前会话的配置
+                    currentSystemMessage = pendingSystemMessage;
+                    currentModel = pendingModel;
                     
                     if (serverWs.readyState === WebSocket.OPEN && connectionEstablished) {
                         console.log('✅ 连接已建立，发送 StartSession');
@@ -501,6 +536,8 @@ wss.on('connection', (clientWs, req) => {
                     sendFinishSession();
                 } else if (msg.type === 'finish_connection') {
                     sendFinishConnection();
+                } else if (msg.type === 'text_input') {
+                    sendTextTaskRequest(msg.text);
                 }
             } catch (e) {
                 console.error('解析客户端消息错误:', e);
@@ -737,7 +774,11 @@ wss.on('connection', (clientWs, req) => {
                 
                 if (pendingSystemMessage) {
                     console.log('📤 发送 StartSession');
-                    sendStartSession(pendingSystemMessage, pendingModel || 'O');
+                    // 确保在 CONNECTION_STARTED 时也更新当前配置
+                    currentSystemMessage = pendingSystemMessage;
+                    currentModel = pendingModel || 'O2.0';
+                    
+                    sendStartSession(pendingSystemMessage, pendingModel || 'O2.0');
                     pendingSystemMessage = null;
                     pendingModel = null;
                 }
@@ -794,7 +835,12 @@ wss.on('connection', (clientWs, req) => {
                     clientWs.send(JSON.stringify({
                         type: 'session_started',
                         session_id: sessionId,
-                        dialog_id: decoded.payload?.dialog_id
+                        dialog_id: decoded.payload?.dialog_id,
+                        // 添加调试信息，告知客户端注入了什么
+                        debug_config: {
+                            model: currentModel || 'unknown',
+                            system_role: currentSystemMessage || 'unknown'
+                        }
                     }));
                 }
                 break;
