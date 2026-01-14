@@ -1292,6 +1292,7 @@
                 case "input_audio_buffer.speech_started":
                     console.log("🎤 检测到用户开始说话，停止 AI 播放");
                     console.log("音频开始时间:", data.audio_start_ms, "ms, Item ID:", data.item_id);
+                    updateStatus('正在聆听...', 'recording');
                     addDebugEvent('speech_started', { audio_start_ms: data.audio_start_ms });
                     stopPlayback();
                     break;
@@ -1370,6 +1371,7 @@
 
                 case "input_audio_buffer.speech_stopped":
                     console.log("🛑 用户停止说话，Item ID:", data.item_id, "音频结束时间:", data.audio_end_ms, "ms");
+                    console.log("📊 本次说话时长:", (data.audio_end_ms - (data.audio_start_ms || 0)), "ms");
                     updateStatus('等待 AI 响应...', 'recording');
                     // 设置超时检测
                     window.responseTimeout = setTimeout(() => {
@@ -1381,6 +1383,23 @@
                             updateStatus('等待响应超时，请查看调试面板', 'error');
                         }
                     }, 10000);
+                    break;
+
+                case "conversation.item.input_audio_transcription.completed":
+                    console.log("📝 用户语音转录完成，Item ID:", data.item_id);
+                    if (data.transcript) {
+                        console.log("💬 用户说的话:", data.transcript);
+                        updateStatus(`已识别: ${data.transcript}`, 'recording');
+                        addDebugEvent('user_transcript', { transcript: data.transcript });
+                    }
+                    break;
+
+                case "conversation.item.input_audio_transcription.failed":
+                    console.warn("⚠️ 用户语音转录失败，Item ID:", data.item_id);
+                    if (data.error) {
+                        console.warn("错误信息:", data.error.message || data.error);
+                        addDebugEvent('transcription_failed', { error: data.error.message || data.error });
+                    }
                     break;
 
                 case "heartbeat":
@@ -1417,9 +1436,16 @@
                     audio: {
                         sampleRate: 16000,
                         channelCount: 1,
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
+                        echoCancellation: true,  // 回声消除
+                        noiseSuppression: true,  // 噪声抑制
+                        autoGainControl: true,   // 自动增益控制
+                        // 添加更多音频约束以提高质量
+                        latency: 0.01,  // 低延迟
+                        googEchoCancellation: true,
+                        googNoiseSuppression: true,
+                        googAutoGainControl: true,
+                        googHighpassFilter: true,  // 高通滤波器，去除低频噪声
+                        googTypingNoiseDetection: true  // 打字噪声检测
                     } 
                 });
                 
@@ -1441,6 +1467,15 @@
 
                     // 检查是否有有效音频（音量大于阈值）
                     const hasAudio = volume > 1; // 1% 音量阈值
+                    
+                    // 记录音频质量信息（每5秒一次）
+                    if (audioChunkCount === 1 || audioChunkCount % 500 === 0) {
+                        const now = Date.now();
+                        if (!window.lastAudioQualityLog || (now - window.lastAudioQualityLog) > 5000) {
+                            console.log(`📊 音频质量: 音量=${volume.toFixed(1)}%, RMS=${rms.toFixed(4)}, 采样率=${inputAudioContext.sampleRate}Hz`);
+                            window.lastAudioQualityLog = now;
+                        }
+                    }
 
                     // 转换为 Int16 PCM（16位深度，单声道）
                     const pcm16 = new Int16Array(inputData.length);
@@ -1676,13 +1711,15 @@
                         input_audio_noise_reduction: {
                             type: "near_field"  // 近场麦克风（耳机/手机），如果是远场用 "far_field"
                         },
+                        // 注意：如果需要启用输入音频转录，需要在 session.update 中配置
+                        // 当前使用 Server VAD 模式，会自动处理语音检测
                         turn_detection: {
                             type: "server_vad",  // 使用服务器端 VAD
                             create_response: true,  // VAD 停止时自动创建响应
                             interrupt_response: true,  // VAD 开始时中断当前响应（支持打断）
-                            prefix_padding_ms: 300,  // VAD 检测到语音前包含的音频量（毫秒）
-                            silence_duration_ms: 800,  // 检测语音停止的静音持续时间（毫秒）- 增加到800ms，更容易触发
-                            threshold: 0.3  // VAD 激活阈值（0.0 到 1.0）- 降低到0.3，更容易检测到语音
+                            prefix_padding_ms: 500,  // VAD 检测到语音前包含的音频量（毫秒）- 增加到500ms，捕获更多上下文
+                            silence_duration_ms: 1500,  // 检测语音停止的静音持续时间（毫秒）- 增加到1500ms，避免过早结束
+                            threshold: 0.5  // VAD 激活阈值（0.0 到 1.0）- 使用默认值0.5，减少误检测
                         },
                         temperature: 0.7,
                         max_response_output_tokens: "inf",

@@ -1,11 +1,13 @@
 {
-  "name": "glm-realtime-demo",
+  "name": "realtime-voice-demo",
   "version": "1.0.0",
-  "description": "GLM-Realtime 实时语音交互 Demo",
+  "description": "GLM-Realtime & Doubao 实时语音交互 Demo",
   "main": "proxy-server.js",
   "scripts": {
     "start": "node proxy-server.js",
-    "dev": "nodemon proxy-server.js"
+    "dev": "nodemon proxy-server.js",
+    "doubao": "node doubao-proxy-server.js",
+    "doubao:dev": "nodemon doubao-proxy-server.js"
   },
   "dependencies": {
     "dotenv": "^16.3.1",

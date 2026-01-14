@@ -69,10 +69,9 @@ const EVENT_IDS = {
 };
 
 // 编码豆包二进制协议消息
-// 根据 Python 参考代码，字段顺序应该是：eventId -> sessionId -> sequence -> payload size -> payload
+// 根据 Python 参考代码，字段顺序应该是：[Sequence] -> [eventId] -> [sessionId] -> payload size -> payload
 function encodeMessage(messageType, messageTypeFlags, payload, eventId = null, sessionId = null, sequence = null, errorCode = null, useCompression = true) {
     // Protocol Version (4 bits) + Header Size (4 bits)
-    // Header Size = 1 (4 bytes header)
     const protocolVersion = 0b0001;
     const headerSize = 0b0001;
     const headerByte1 = (protocolVersion << 4) | headerSize; // 0x11
@@ -81,30 +80,31 @@ function encodeMessage(messageType, messageTypeFlags, payload, eventId = null, s
     const headerByte2 = (messageType << 4) | messageTypeFlags;
     
     // Serialization Method (4 bits) + Compression Type (4 bits)
-    // 对于 AUDIO_ONLY_REQUEST，使用 NO_SERIALIZATION (0b0000)
-    // 对于其他消息，使用 JSON (0b0001)
     const isAudioOnly = messageType === MESSAGE_TYPES.AUDIO_ONLY_REQUEST;
     const serializationMethod = isAudioOnly ? 0b0000 : 0b0001; // NO_SERIALIZATION or JSON
     const compressionType = useCompression ? 0b0001 : 0b0000; // GZIP or NO_COMPRESSION
     const headerByte3 = (serializationMethod << 4) | compressionType;
-    // 0x01 (NO_SERIALIZATION + GZIP) for audio
-    // 0x11 (JSON + GZIP) for JSON messages
-    // 0x10 (JSON + NO_COMPRESSION) for JSON without compression
     
-    // Reserved (8 bits)
-    const headerByte4 = 0x00;
+    const headerByte4 = 0x00; // Reserved
     
-    // 按照 Python 参考代码的顺序构建消息体
     const bodyParts = [];
     
-    // 1. eventId (如果有)
+    // 1. sequence (如果有标志位 0b0001 或 0b0010)
+    if (sequence !== null) {
+        const buf = Buffer.alloc(4);
+        buf.writeUInt32BE(sequence);
+        bodyParts.push(buf);
+    }
+
+    // 2. eventId (如果有标志位 0b0100)
     if (eventId !== null) {
         const buf = Buffer.alloc(4);
-        buf.writeInt32BE(eventId);
+        buf.writeUInt32BE(eventId);
         bodyParts.push(buf);
     }
     
-    // 2. sessionId (如果有) - 先写长度，再写内容
+    // 3. sessionId (根据 Python 代码，在 StartSession 和 TaskRequest 中紧跟在 EventId 后)
+    // 注意：StartConnection 不需要 sessionId
     if (sessionId !== null) {
         const sessionIdBuf = Buffer.from(sessionId, 'utf8');
         const sizeBuf = Buffer.alloc(4);
@@ -113,60 +113,34 @@ function encodeMessage(messageType, messageTypeFlags, payload, eventId = null, s
         bodyParts.push(sessionIdBuf);
     }
     
-    // 3. sequence (如果有)
-    if (sequence !== null) {
-        const buf = Buffer.alloc(4);
-        buf.writeInt32BE(sequence);
-        bodyParts.push(buf);
-    }
-    
-    // 4. Payload - 根据类型处理
+    // 4. Payload 处理
     let payloadBuf;
     if (Buffer.isBuffer(payload)) {
-        // 二进制数据（音频）
-        if (useCompression) {
-            payloadBuf = zlib.gzipSync(payload);
-        } else {
-            payloadBuf = payload;
-        }
+        payloadBuf = useCompression ? zlib.gzipSync(payload) : payload;
     } else {
-        // JSON 数据
-        const jsonStr = JSON.stringify(payload);
-        const jsonBuf = Buffer.from(jsonStr, 'utf8');
-        if (useCompression) {
-            payloadBuf = zlib.gzipSync(jsonBuf);
-        } else {
-            payloadBuf = jsonBuf;
-        }
+        const jsonBuf = Buffer.from(JSON.stringify(payload), 'utf8');
+        payloadBuf = useCompression ? zlib.gzipSync(jsonBuf) : jsonBuf;
     }
     
     // 5. Payload size (4 bytes)
     const payloadSizeBuf = Buffer.alloc(4);
-    payloadSizeBuf.writeInt32BE(payloadBuf.length);
+    payloadSizeBuf.writeUInt32BE(payloadBuf.length);
     bodyParts.push(payloadSizeBuf);
     
-    // 6. Payload
+    // 6. Payload data
     bodyParts.push(payloadBuf);
     
-    // 组合所有部分
-    const headerLength = 4;
-    const bodyLength = bodyParts.reduce((sum, buf) => sum + buf.length, 0);
-    const totalLength = headerLength + bodyLength;
-    const result = Buffer.alloc(totalLength);
+    // 组合
+    const result = Buffer.alloc(4 + bodyParts.reduce((sum, b) => sum + b.length, 0));
     let offset = 0;
-    
-    // Header (4 bytes)
     result[offset++] = headerByte1;
     result[offset++] = headerByte2;
     result[offset++] = headerByte3;
     result[offset++] = headerByte4;
-    
-    // Body parts (按照顺序)
     for (const part of bodyParts) {
         part.copy(result, offset);
         offset += part.length;
     }
-    
     return result;
 }
 
@@ -195,8 +169,9 @@ function decodeMessage(buffer) {
     let payloadData = null;
     
     // 根据消息类型解析
+    // SERVER_ACK (0b1011) 和 FULL_SERVER_RESPONSE (0b1001) 使用相同的格式
     if (messageType === MESSAGE_TYPES.FULL_SERVER_RESPONSE || messageType === 0b1011) {  // SERVER_ACK
-        // SERVER_FULL_RESPONSE 或 SERVER_ACK
+        // SERVER_FULL_RESPONSE、SERVER_ACK 或 AUDIO_ONLY_RESPONSE
         // 顺序：sequence? -> event? -> sessionId_size -> sessionId -> payload_size -> payload
         
         // 1. sequence (如果有 NEG_SEQUENCE flag)
@@ -392,10 +367,10 @@ wss.on('connection', (clientWs, req) => {
                 }
             },
             tts: {
-                speaker: 'zh_male_yunzhou_jupiter_bigtts',
+                speaker: 'zh_female_vv_jupiter_bigtts', // 切换到标准女声测试
                 audio_config: {
                     channel: 1,
-                    format: 'pcm',
+                    format: 'pcm_s16le', // 明确指定 PCM 格式
                     sample_rate: 24000
                 }
             },
@@ -405,9 +380,8 @@ wss.on('connection', (clientWs, req) => {
                 speaking_style: '',
                 dialog_id: '',
                 extra: {
-                    model: model,
                     strict_audit: false,
-                    input_mod: 'microphone',
+                    input_mod: 'audio', // 参考代码使用 'audio'
                     recv_timeout: 10
                 }
             }
@@ -415,77 +389,52 @@ wss.on('connection', (clientWs, req) => {
         
         const msg = encodeMessage(
             MESSAGE_TYPES.FULL_CLIENT_REQUEST,
-            0b1100,  // flags: 有 eventId 和 sessionId
+            0b0100,  // 修复：仅使用官方 hasEvent 标志 (0b0100)
             sessionConfig,
             EVENT_IDS.START_SESSION,
             sessionId,
             null,
             null,
-            true  // 使用 GZIP 压缩
+            true
         );
         
-        console.log('📤 发送 StartSession');
-        console.log('  - sessionId:', sessionId);
-        console.log('  - 消息长度:', msg.length, '字节');
-        console.log('  - payload (已压缩):', JSON.stringify(sessionConfig).substring(0, 100) + '...');
+        console.log('📤 发送 StartSession (eventId: 100)');
         serverWs.send(msg);
     }
-    
+
     function sendTaskRequest(audioData, isLast = false) {
-        if (!sessionId) {
-            console.warn('⚠️ 尝试发送音频数据但会话未启动');
-            return;
-        }
+        if (!sessionId) return;
         
-        // 确保 audioData 是 Buffer
-        let audioBuffer;
-        if (Buffer.isBuffer(audioData)) {
-            audioBuffer = audioData;
-        } else if (audioData instanceof ArrayBuffer) {
-            audioBuffer = Buffer.from(audioData);
-        } else if (audioData.buffer instanceof ArrayBuffer) {
-            // TypedArray (如 Int16Array)
-            audioBuffer = Buffer.from(audioData.buffer, audioData.byteOffset, audioData.byteLength);
-        } else {
-            console.error('⚠️ 未知的音频数据类型:', typeof audioData, audioData.constructor?.name);
-            return;
-        }
+        // 确保是 Buffer
+        const audioBuffer = Buffer.isBuffer(audioData) ? audioData : Buffer.from(audioData);
         
-        // 根据 Python 参考代码，AUDIO_ONLY_REQUEST 的格式：
-        // eventId (200) -> sessionId size -> sessionId -> payload size -> payload
-        // 没有 sequence！
         const msg = encodeMessage(
             MESSAGE_TYPES.AUDIO_ONLY_REQUEST,
-            0b1100,  // flags: 有 eventId (0b0100) 和 sessionId (0b1000)
+            0b0100,  // 修复：仅使用官方 hasEvent 标志 (0b0100)
             audioBuffer,
             EVENT_IDS.TASK_REQUEST,
             sessionId,
-            null,  // 没有 sequence
             null,
-            true  // 使用 GZIP 压缩音频数据
+            null,
+            true
         );
         
         serverWs.send(msg);
         messageCount++;
-        
-        if (messageCount % 100 === 0) {
-            const compressedSize = msg.length - (4 + 4 + 4 + Buffer.from(sessionId).length + 4); // header + eventId + sessionId_size + sessionId + payload_size
-            console.log(`📤 发送音频数据 (${messageCount} 包, 原始大小: ${audioBuffer.length} 字节, 压缩后: ${compressedSize} 字节)`);
-        }
     }
-    
+
     function sendFinishSession() {
         const msg = encodeMessage(
             MESSAGE_TYPES.FULL_CLIENT_REQUEST,
-            0b1000,  // flags: 有 sessionId
+            0b0100,  // 修复：仅使用官方 hasEvent 标志 (0b0100)
             {},
             EVENT_IDS.FINISH_SESSION,
             sessionId,
             null,
             null,
-            true  // 使用 GZIP 压缩
+            true
         );
-        console.log('📤 发送 FinishSession');
+        console.log('📤 发送 FinishSession (eventId: 102)');
         serverWs.send(msg);
     }
     
@@ -561,10 +510,27 @@ wss.on('connection', (clientWs, req) => {
     
     serverWs.on('message', (data) => {
         lastMessageTime = Date.now();
-        console.log('📥 收到服务器消息, 长度:', data.length);
-        console.log('📥 消息前 20 字节:', Array.from(Buffer.from(data).slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+        const buffer = Buffer.from(data);
+        console.log('📥 收到服务器消息, 长度:', buffer.length);
+        console.log('📥 消息前 20 字节:', Array.from(buffer.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
         
-        const decoded = decodeMessage(Buffer.from(data));
+        // 快速检查消息类型
+        if (buffer.length >= 2) {
+            const messageType = (buffer[1] >> 4) & 0x0F;
+            const messageTypeName = 
+                messageType === 0b1011 ? '(SERVER_ACK - 可能是音频)' :
+                messageType === MESSAGE_TYPES.AUDIO_ONLY_RESPONSE ? '(AUDIO_ONLY_RESPONSE)' :
+                messageType === MESSAGE_TYPES.FULL_SERVER_RESPONSE ? '(FULL_SERVER_RESPONSE)' :
+                messageType === MESSAGE_TYPES.ERROR_INFO ? '(ERROR_INFO)' : '(OTHER)';
+            console.log('📥 消息类型 (快速检查):', messageType, messageTypeName);
+            
+            // 如果是音频响应，特别标记
+            if (messageType === 0b1011 || messageType === MESSAGE_TYPES.AUDIO_ONLY_RESPONSE) {
+                console.log('🎵 检测到可能的音频响应消息！');
+            }
+        }
+        
+        const decoded = decodeMessage(buffer);
         
         if (!decoded) {
             console.warn('⚠️ 无法解析服务器消息');
@@ -573,22 +539,48 @@ wss.on('connection', (clientWs, req) => {
         }
         
         console.log('📥 解析结果:');
-        console.log('  - messageType:', decoded.messageType, `(${decoded.messageType === MESSAGE_TYPES.ERROR_INFO ? 'ERROR_INFO' : decoded.messageType === MESSAGE_TYPES.FULL_SERVER_RESPONSE ? 'FULL_SERVER_RESPONSE' : 'OTHER'})`);
+        const messageTypeName = 
+            decoded.messageType === MESSAGE_TYPES.ERROR_INFO ? 'ERROR_INFO' :
+            decoded.messageType === MESSAGE_TYPES.FULL_SERVER_RESPONSE ? 'FULL_SERVER_RESPONSE' :
+            decoded.messageType === 0b1011 ? 'SERVER_ACK' :
+            decoded.messageType === MESSAGE_TYPES.AUDIO_ONLY_RESPONSE ? 'AUDIO_ONLY_RESPONSE' :
+            'OTHER';
+        console.log('  - messageType:', decoded.messageType, `(${messageTypeName})`);
         console.log('  - flags:', decoded.flags.toString(2).padStart(4, '0'));
-        console.log('  - eventId:', decoded.eventId);
+        console.log('  - eventId:', decoded.eventId, decoded.eventId === EVENT_IDS.TTS_RESPONSE ? '(TTS_RESPONSE)' : '');
         console.log('  - sessionId:', decoded.sessionId);
         console.log('  - errorCode:', decoded.errorCode);
         console.log('  - sequence:', decoded.sequence);
+        console.log('  - compressionType:', decoded.compressionType);
+        console.log('  - serializationMethod:', decoded.serializationMethod);
         
         // 详细输出 payload
         if (decoded.payload) {
-            if (typeof decoded.payload === 'object') {
-                console.log('  - payload (JSON):', JSON.stringify(decoded.payload, null, 2));
+            if (Buffer.isBuffer(decoded.payload)) {
+                console.log('  - payload (Buffer):', decoded.payload.length, '字节');
+            } else if (typeof decoded.payload === 'object') {
+                console.log('  - payload (JSON):', JSON.stringify(decoded.payload, null, 2).substring(0, 200));
             } else {
-                console.log('  - payload (raw):', String(decoded.payload));
+                console.log('  - payload (raw):', String(decoded.payload).substring(0, 200));
             }
         } else {
             console.log('  - payload: null 或空');
+        }
+        
+        // 自动检测并转发所有二进制音频数据
+        if (decoded.serializationMethod === 0b0000 && Buffer.isBuffer(decoded.payload)) {
+            console.log('🎵 检测到二进制数据包 (NO_SERIALIZATION)，尝试作为音频转发...');
+            console.log('  - 数据采样 (前10字节):', decoded.payload.slice(0, 10).toString('hex'));
+            if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.send(decoded.payload, { binary: true });
+                console.log('✅ 音频数据已转发到客户端, 大小:', decoded.payload.length);
+            }
+            if (decoded.messageType === 0b1011) return;
+        }
+        
+        // 如果是 SERVER_ACK 且 payload 是 Buffer，特别标记
+        if (decoded.messageType === 0b1011 && Buffer.isBuffer(decoded.payload)) {
+            console.log('🎵 检测到 SERVER_ACK 音频消息！');
         }
         
         // 处理错误消息（ERROR_INFO 类型的消息）
@@ -623,11 +615,117 @@ wss.on('connection', (clientWs, req) => {
             return;
         }
         
+        // 处理 SERVER_ACK 类型的消息（TTS 音频数据）
+        // 根据 Python 参考代码，TTS 音频是通过 SERVER_ACK (0b1011) 发送的，payload_msg 是 bytes
+        if (decoded.messageType === 0b1011) {  // SERVER_ACK
+            console.log('📥 收到 SERVER_ACK 消息');
+            console.log('  - messageType:', decoded.messageType, '(SERVER_ACK)');
+            console.log('  - compressionType:', decoded.compressionType);
+            console.log('  - serializationMethod:', decoded.serializationMethod);
+            console.log('  - eventId:', decoded.eventId);
+            console.log('  - payload 类型:', typeof decoded.payload);
+            console.log('  - payload 是 Buffer:', Buffer.isBuffer(decoded.payload));
+            console.log('  - rawPayload 大小:', decoded.rawPayload?.length || 0);
+            
+            // 检查是否是音频数据
+            // 根据 Python 代码：if response['message_type'] == 'SERVER_ACK' and isinstance(response.get('payload_msg'), bytes)
+            // payload_msg 是 bytes 类型，说明 serializationMethod 应该是 NO_SERIALIZATION (0b0000)
+            let audioData = null;
+            
+            if (Buffer.isBuffer(decoded.payload)) {
+                // payload 已经是 Buffer（音频数据）
+                audioData = decoded.payload;
+                console.log('🔊 使用 payload (Buffer), 大小:', audioData.length);
+            } else if (Buffer.isBuffer(decoded.rawPayload)) {
+                // 使用 rawPayload（可能还需要解压缩）
+                audioData = decoded.rawPayload;
+                if (decoded.compressionType === 0b0001) {  // GZIP
+                    try {
+                        audioData = zlib.gunzipSync(decoded.rawPayload);
+                        console.log('🔊 音频数据已解压缩, 原始大小:', decoded.rawPayload.length, '解压后:', audioData.length);
+                    } catch (gzipError) {
+                        console.error('⚠️ TTS 音频解压缩失败:', gzipError.message);
+                        audioData = decoded.rawPayload;
+                    }
+                }
+                console.log('🔊 使用 rawPayload, 大小:', audioData.length);
+            }
+            
+            if (audioData && audioData.length > 0) {
+                console.log('🔊 收到 SERVER_ACK (TTS 音频数据), 大小:', audioData.length, '字节');
+                if (clientWs.readyState === WebSocket.OPEN) {
+                    clientWs.send(audioData, { binary: true });
+                    console.log('✅ TTS 音频数据已发送到客户端, 大小:', audioData.length);
+                } else {
+                    console.warn('⚠️ 客户端 WebSocket 未打开, 无法发送音频数据');
+                }
+                return;
+            } else {
+                // SERVER_ACK 但 payload 不是 bytes，可能是其他类型的 ACK
+                console.log('📥 收到 SERVER_ACK (非音频), payload 类型:', typeof decoded.payload);
+                // 继续处理，可能是有 eventId 的其他消息
+            }
+        }
+        
+        // 处理 AUDIO_ONLY_RESPONSE 类型的消息（备用，可能也用这种方式发送音频）
+        if (decoded.messageType === MESSAGE_TYPES.AUDIO_ONLY_RESPONSE) {
+            console.log('🔊 收到 AUDIO_ONLY_RESPONSE (TTS 音频数据)');
+            console.log('  - messageType:', decoded.messageType, '(AUDIO_ONLY_RESPONSE)');
+            console.log('  - compressionType:', decoded.compressionType);
+            console.log('  - serializationMethod:', decoded.serializationMethod);
+            console.log('  - rawPayload 大小:', decoded.rawPayload?.length || 0);
+            console.log('  - payloadData 类型:', typeof decoded.payload);
+            
+            if (clientWs.readyState === WebSocket.OPEN) {
+                // TTS 音频数据
+                let audioData;
+                
+                if (Buffer.isBuffer(decoded.payload)) {
+                    // payloadData 已经是解压后的音频数据
+                    audioData = decoded.payload;
+                    console.log('🔊 使用 payloadData (Buffer), 大小:', audioData.length);
+                } else if (Buffer.isBuffer(decoded.rawPayload)) {
+                    // 使用 rawPayload，需要解压缩
+                    audioData = decoded.rawPayload;
+                    if (decoded.compressionType === 0b0001) {  // GZIP
+                        try {
+                            audioData = zlib.gunzipSync(decoded.rawPayload);
+                            console.log('🔊 音频数据已解压缩, 原始大小:', decoded.rawPayload.length, '解压后:', audioData.length);
+                        } catch (gzipError) {
+                            console.error('⚠️ TTS 音频解压缩失败:', gzipError.message);
+                            audioData = decoded.rawPayload;
+                        }
+                    }
+                } else {
+                    console.error('⚠️ TTS 音频数据格式错误');
+                    return;
+                }
+                
+                if (audioData && audioData.length > 0) {
+                    clientWs.send(audioData, { binary: true });
+                    console.log('✅ TTS 音频数据已发送到客户端, 大小:', audioData.length);
+                } else {
+                    console.warn('⚠️ TTS 音频数据为空');
+                }
+            }
+            return;
+        }
+        
         // 如果没有 eventId，可能是其他类型的消息
         if (decoded.eventId === null) {
-            console.warn('⚠️ 收到没有 eventId 的消息，messageType:', decoded.messageType);
-            if (decoded.payload) {
-                console.warn('⚠️ payload:', JSON.stringify(decoded.payload));
+            console.warn('⚠️ 收到没有 eventId 的消息');
+            console.warn('  - messageType:', decoded.messageType);
+            console.warn('  - flags:', decoded.flags.toString(2).padStart(4, '0'));
+            console.warn('  - compressionType:', decoded.compressionType);
+            console.warn('  - serializationMethod:', decoded.serializationMethod);
+            console.warn('  - rawPayload 大小:', decoded.rawPayload?.length || 0);
+            
+            // 如果是 AUDIO_ONLY_RESPONSE 但没有 eventId，可能是音频数据
+            if (decoded.messageType === MESSAGE_TYPES.AUDIO_ONLY_RESPONSE) {
+                console.log('🎵 检测到 AUDIO_ONLY_RESPONSE 但没有 eventId，可能是音频数据');
+                // 已经在上面处理了，这里不需要重复处理
+            } else if (decoded.payload) {
+                console.warn('⚠️ payload:', typeof decoded.payload === 'object' ? JSON.stringify(decoded.payload).substring(0, 200) : String(decoded.payload).substring(0, 200));
             }
             return;
         }
@@ -727,20 +825,45 @@ wss.on('connection', (clientWs, req) => {
                 break;
                 
             case EVENT_IDS.TTS_RESPONSE:
-                console.log('🔊 收到 TTS 音频数据, 大小:', decoded.rawPayload?.length || 0);
+                console.log('🔊 收到 TTS 音频数据');
+                console.log('  - messageType:', decoded.messageType);
+                console.log('  - compressionType:', decoded.compressionType);
+                console.log('  - serializationMethod:', decoded.serializationMethod);
+                console.log('  - rawPayload 大小:', decoded.rawPayload?.length || 0);
+                console.log('  - payloadData 类型:', typeof decoded.payload);
+                
                 if (clientWs.readyState === WebSocket.OPEN) {
-                    // TTS 音频数据是压缩后的，需要解压缩
-                    let audioData = decoded.rawPayload;
-                    if (decoded.compressionType === 0b0001) {  // GZIP
-                        try {
-                            audioData = zlib.gunzipSync(decoded.rawPayload);
-                            console.log('🔊 音频数据已解压缩, 原始大小:', decoded.rawPayload.length, '解压后:', audioData.length);
-                        } catch (gzipError) {
-                            console.error('⚠️ TTS 音频解压缩失败:', gzipError.message);
-                            audioData = decoded.rawPayload;
+                    // TTS 音频数据已经在 decodeMessage 中解压缩和解析
+                    // 如果 payloadData 是 Buffer，直接使用；否则使用 rawPayload
+                    let audioData;
+                    
+                    if (Buffer.isBuffer(decoded.payload)) {
+                        // payloadData 已经是解压后的音频数据
+                        audioData = decoded.payload;
+                        console.log('🔊 使用 payloadData (Buffer), 大小:', audioData.length);
+                    } else if (Buffer.isBuffer(decoded.rawPayload)) {
+                        // 使用 rawPayload，需要解压缩
+                        audioData = decoded.rawPayload;
+                        if (decoded.compressionType === 0b0001) {  // GZIP
+                            try {
+                                audioData = zlib.gunzipSync(decoded.rawPayload);
+                                console.log('🔊 音频数据已解压缩, 原始大小:', decoded.rawPayload.length, '解压后:', audioData.length);
+                            } catch (gzipError) {
+                                console.error('⚠️ TTS 音频解压缩失败:', gzipError.message);
+                                audioData = decoded.rawPayload;
+                            }
                         }
+                    } else {
+                        console.error('⚠️ TTS 音频数据格式错误');
+                        return;
                     }
-                    clientWs.send(audioData, { binary: true });
+                    
+                    if (audioData && audioData.length > 0) {
+                        clientWs.send(audioData, { binary: true });
+                        console.log('✅ TTS 音频数据已发送到客户端, 大小:', audioData.length);
+                    } else {
+                        console.warn('⚠️ TTS 音频数据为空');
+                    }
                 }
                 break;
                 

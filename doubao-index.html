@@ -774,10 +774,11 @@
         async function handleAudioData(audioData) {
             // 将音频数据添加到队列
             audioQueue.push(audioData);
-            console.log("🔊 收到音频数据，队列长度:", audioQueue.length, "大小:", audioData.byteLength);
+            console.log("🔊 收到音频数据，队列长度:", audioQueue.length, "大小:", audioData.byteLength || audioData.length);
             
             // 如果当前没有播放音频，开始播放
             if (!isPlayingAudio) {
+                console.log("🔊 开始播放音频队列");
                 playAudioQueue();
             }
         }
@@ -801,12 +802,37 @@
                         });
                     }
                     
+                    // 确保 audioContext 处于运行状态（浏览器自动播放策略）
+                    if (audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
+                        await audioContext.resume();
+                        console.log("🔊 AudioContext 已恢复, 状态:", audioContext.state);
+                    }
+                    
+                    // 处理 ArrayBuffer 或 Buffer
+                    let audioArrayBuffer;
+                    if (audioData instanceof ArrayBuffer) {
+                        audioArrayBuffer = audioData;
+                    } else if (audioData.buffer instanceof ArrayBuffer) {
+                        audioArrayBuffer = audioData.buffer;
+                    } else {
+                        console.error("⚠️ 未知的音频数据格式:", audioData);
+                        continue;
+                    }
+                    
+                    // 关键修复：确保字节长度是偶数（PCM 16bit 要求 2 字节一个采样）
+                    // 如果长度是奇数，截断最后一个字节
+                    const validByteLength = audioArrayBuffer.byteLength - (audioArrayBuffer.byteLength % 2);
+                    if (validByteLength === 0) continue;
+
                     // 将 Int16 PCM 数据转换为 Float32
-                    const int16Data = new Int16Array(audioData);
+                    // 指定 byteOffset 和 length，确保即使 buffer 有多余字节也能正常工作
+                    const int16Data = new Int16Array(audioArrayBuffer, 0, validByteLength / 2);
                     const float32Data = new Float32Array(int16Data.length);
                     
                     for (let i = 0; i < int16Data.length; i++) {
-                        float32Data[i] = int16Data[i] / 32768.0;
+                        // Int16 范围: -32768 到 32767
+                        // Float32 范围: -1.0 到 1.0
+                        float32Data[i] = Math.max(-1, Math.min(1, int16Data[i] / 32768.0));
                     }
                     
                     // 创建音频缓冲区
@@ -820,12 +846,22 @@
                     
                     // 等待播放完成
                     await new Promise((resolve, reject) => {
-                        source.onended = resolve;
-                        source.onerror = reject;
-                        source.start(0);
+                        source.onended = () => {
+                            console.log("🔊 音频片段播放完成, 长度:", float32Data.length, "样本");
+                            resolve();
+                        };
+                        source.onerror = (error) => {
+                            console.error("播放音频错误:", error);
+                            reject(error);
+                        };
+                        try {
+                            source.start(0);
+                        } catch (e) {
+                            console.error("启动音频播放失败:", e);
+                            reject(e);
+                        }
                     });
                     
-                    console.log("🔊 音频片段播放完成");
                 } catch (error) {
                     console.error("播放音频错误:", error);
                 }
