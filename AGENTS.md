@@ -23,3 +23,23 @@ git add index.html proxy-server.js
 git commit -m "Add system message settings UI and MCP tools integration"
 git push
 ```
+
+## Doubao Realtime Voice Model
+
+### Reference Documentation
+- Realtime API: https://www.volcengine.com/docs/6893/1527770
+- WebSocket Protocol: https://www.volcengine.com/docs/6561/1329505
+- Full API Docs: https://www.volcengine.com/docs/6561/1594356
+
+### Running Commands
+
+```bash
+# Start Doubao proxy server
+npm run doubao
+
+# Access Doubao frontend
+# Open: http://localhost:3001/doubao-index.html
+
+# Or start with nodemon for development
+npm run doubao:dev
+```

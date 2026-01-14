@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 学习助教 - 豆包实时语音</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h2 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 24px;
+        }
+
+        .model-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+
+        #status {
+            margin-bottom: 20px;
+            color: #666;
+            text-align: center;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.recording {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .settings-btn {
+            background: #f0f2f5;
+            color: #333;
+            padding: 8px 16px;
+            font-size: 14px;
+            flex: none;
+            width: auto;
+        }
+
+        .settings-btn:hover {
+            background: #e4e6e9;
+        }
+
+        /* 模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.3s;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 20px;
+            color: #333;
+            margin: 0;
+        }
+
+        .close-btn {
+            background: transparent;
+            border: none;
+            font-size: 28px;
+            color: #999;
+            cursor: pointer;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            max-width: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: background-color 0.2s, color 0.2s;
+            line-height: 1;
+            user-select: none;
+            flex: 0 0 40px;
+        }
+
+        .close-btn:hover {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .close-btn:active {
+            background: #e0e0e0;
+        }
+
+        .presets-container {
+            margin-bottom: 20px;
+        }
+
+        .presets-title {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .presets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .preset-btn {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            text-align: center;
+            transition: all 0.2s;
+            color: #333;
+        }
+
+        .preset-btn:hover {
+            background: #e9ecef;
+            border-color: #ff6b6b;
+        }
+
+        .preset-btn.active {
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            color: white;
+            border-color: #ff6b6b;
+        }
+
+        .custom-message-container {
+            margin-top: 20px;
+        }
+
+        .custom-message-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        #systemMessage {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+
+        #systemMessage:focus {
+            outline: none;
+            border-color: #ff6b6b;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .modal-btn {
+            padding: 10px 24px;
+            font-size: 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .modal-btn-primary {
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            color: white;
+        }
+
+        .modal-btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 107, 107, 0.4);
+        }
+
+        .modal-btn-secondary {
+            background: #f0f2f5;
+            color: #333;
+        }
+
+        .modal-btn-secondary:hover {
+            background: #e4e6e9;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 8px;
+            border: none;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        #startBtn {
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%);
+            color: white;
+        }
+
+        #startBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 107, 107, 0.4);
+        }
+
+        #stopBtn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        #stopBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+        }
+
+        button:disabled {
+            background: #e0e0e0;
+            color: #999;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .visualizer {
+            width: 100%;
+            height: 60px;
+            background: #f0f2f5;
+            margin-top: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            position: relative;
+        }
+
+        #v-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ff6b6b 0%, #feca57 100%);
+            transition: width 0.1s;
+            border-radius: 8px;
+        }
+
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #555;
+            line-height: 1.6;
+        }
+
+        .info-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #e65100;
+        }
+
+        .asr-text {
+            margin-top: 15px;
+            padding: 12px;
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #333;
+            min-height: 40px;
+        }
+
+        .chat-text {
+            margin-top: 15px;
+            padding: 12px;
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #333;
+            min-height: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>AI 助教实时交互 <span class="model-badge">豆包模型</span></h2>
+        <div id="status" class="status">状态: 等待连接...</div>
+        
+        <div class="controls">
+            <div class="button-group">
+                <button id="startBtn">开始学习模式</button>
+                <button id="stopBtn" disabled>停止</button>
+                <button class="settings-btn" id="settingsBtn">⚙️ 设置</button>
+            </div>
+        </div>
+
+        <!-- 设置模态框 -->
+        <div class="modal" id="settingsModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>⚙️ 系统提示词设置</h3>
+                    <button class="close-btn" id="closeModalBtn" type="button" aria-label="关闭">×</button>
+                </div>
+                
+                <div class="presets-container">
+                    <div class="presets-title">预设风格：</div>
+                    <div class="presets-grid" id="presetsGrid">
+                        <!-- 预设选项将通过 JavaScript 动态生成 -->
+                    </div>
+                </div>
+
+                <div class="custom-message-container">
+                    <div class="custom-message-label">自定义提示词：</div>
+                    <textarea id="systemMessage" placeholder="输入自定义系统提示词..."></textarea>
+                    <div id="systemMessageStatus" style="margin-top: 8px; font-size: 12px; color: #666;">
+                        <span id="systemMessageLength">0</span> 字符
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button class="modal-btn modal-btn-secondary" id="cancelBtn">取消</button>
+                    <button class="modal-btn modal-btn-primary" id="saveBtn">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="visualizer">
+            <div id="v-bar"></div>
+        </div>
+
+        <div class="asr-text" id="asrText">
+            <strong>👂 识别到的语音：</strong> <span id="asrContent">-</span>
+        </div>
+
+        <div class="chat-text" id="chatText">
+            <strong>🤖 AI 回复：</strong> <span id="chatContent">-</span>
+        </div>
+
+        <div class="info">
+            <div class="info-title">使用说明：</div>
+            <div>1. 确保代理服务器已启动 (npm run doubao)</div>
+            <div>2. 点击"开始学习模式"按钮</div>
+            <div>3. 允许浏览器访问麦克风权限</div>
+            <div>4. 开始说话，AI 会实时响应</div>
+            <div>5. 您可以在 AI 说话时随时打断</div>
+            <div style="margin-top: 10px; color: #999; font-size: 12px;">
+                注意：API Key 已在服务器端配置，无需在前端输入
+            </div>
+        </div>
+
+        <div class="info" id="debugPanel" style="margin-top: 15px; max-height: 200px; overflow-y: auto; display: none;">
+            <div class="info-title">🔍 调试信息（最近10个事件）：</div>
+            <div id="debugEvents" style="font-family: monospace; font-size: 11px; line-height: 1.4;"></div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let audioContext;
+        let mediaStream;
+        let sourceNode;
+        let scriptProcessor;
+        let isRecording = false;
+        let eventIdCounter = 0;
+        let currentChatText = '';  // 用于累积 AI 回复文本
+        let audioQueue = [];  // 音频队列，用于累积音频数据
+        let isPlayingAudio = false;  // 是否正在播放音频
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusText = document.getElementById('status');
+        const vBar = document.getElementById('v-bar');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsModal = document.getElementById('settingsModal');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const systemMessageInput = document.getElementById('systemMessage');
+        const presetsGrid = document.getElementById('presetsGrid');
+        const systemMessageLength = document.getElementById('systemMessageLength');
+        const asrContent = document.getElementById('asrContent');
+        const chatContent = document.getElementById('chatContent');
+
+        const PRESETS = [
+            {
+                id: 'gentle_tutor',
+                name: '温柔助教',
+                message: '你是一个温柔的学习助教，随时准备回答问题。如果我打断你，请立即停止讲解并听我说。'
+            },
+            {
+                id: 'strict_teacher',
+                name: '严格老师',
+                message: '你是一位严格的老师，对学生要求很高。你会指出学生的错误，并给出建设性的批评。回答问题时要专业、准确，不要过于温和。'
+            },
+            {
+                id: 'friendly_friend',
+                name: '友好伙伴',
+                message: '你是一个友好的学习伙伴，像朋友一样轻松地交流。用简单易懂的语言解释复杂概念，保持轻松愉快的氛围。'
+            },
+            {
+                id: 'socratic_guide',
+                name: '苏格拉底式',
+                message: '你采用苏格拉底式教学法，通过提问引导学生思考，而不是直接给出答案。鼓励学生自己发现问题的解决方案。'
+            },
+            {
+                id: 'technical_expert',
+                name: '技术专家',
+                message: '你是一位技术专家，擅长深入分析技术问题。回答时要详细、准确，提供代码示例和最佳实践。'
+            },
+            {
+                id: 'creative_coach',
+                name: '创意教练',
+                message: '你是一位创意教练，鼓励创新思维和发散性思考。帮助学习者从不同角度看待问题，激发创造力。'
+            }
+        ];
+
+        const DEFAULT_SYSTEM_MESSAGE = PRESETS[0].message;
+        let currentPresetId = null;
+        let currentSessionId = null;
+
+        function initPresets() {
+            presetsGrid.innerHTML = '';
+            PRESETS.forEach(preset => {
+                const btn = document.createElement('button');
+                btn.className = 'preset-btn';
+                btn.textContent = preset.name;
+                btn.dataset.presetId = preset.id;
+                btn.onclick = () => selectPreset(preset.id);
+                presetsGrid.appendChild(btn);
+            });
+        }
+
+        function updateSystemMessageLength() {
+            if (systemMessageLength) {
+                const length = systemMessageInput.value.length;
+                systemMessageLength.textContent = length;
+                if (length === 0) {
+                    systemMessageLength.style.color = '#999';
+                } else {
+                    systemMessageLength.style.color = '#666';
+                }
+            }
+        }
+
+        if (systemMessageInput) {
+            systemMessageInput.addEventListener('input', updateSystemMessageLength);
+        }
+
+        function selectPreset(presetId) {
+            currentPresetId = presetId;
+            const preset = PRESETS.find(p => p.id === presetId);
+            if (preset) {
+                systemMessageInput.value = preset.message;
+                document.querySelectorAll('.preset-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.presetId === presetId);
+                });
+            }
+        }
+
+        function openModal() {
+            const savedMessage = localStorage.getItem('doubao_system_message');
+            const savedPresetId = localStorage.getItem('doubao_selected_preset_id');
+            
+            if (savedMessage) {
+                systemMessageInput.value = savedMessage;
+                const matchingPreset = PRESETS.find(p => p.message === savedMessage);
+                if (matchingPreset) {
+                    selectPreset(matchingPreset.id);
+                } else {
+                    currentPresetId = null;
+                    document.querySelectorAll('.preset-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                }
+            } else {
+                systemMessageInput.value = DEFAULT_SYSTEM_MESSAGE;
+                selectPreset(PRESETS[0].id);
+            }
+            
+            updateSystemMessageLength();
+            settingsModal.classList.add('show');
+        }
+
+        function closeModal() {
+            settingsModal.classList.remove('show');
+        }
+
+        function saveSettings() {
+            const message = systemMessageInput.value.trim();
+            if (!message) {
+                alert('请输入系统提示词');
+                return;
+            }
+            
+            localStorage.setItem('doubao_system_message', message);
+            if (currentPresetId) {
+                localStorage.setItem('doubao_selected_preset_id', currentPresetId);
+            } else {
+                localStorage.removeItem('doubao_selected_preset_id');
+            }
+            
+            closeModal();
+        }
+
+        function getCurrentSystemMessage() {
+            const savedMessage = localStorage.getItem('doubao_system_message');
+            return savedMessage || DEFAULT_SYSTEM_MESSAGE;
+        }
+
+        function generateEventId() {
+            return `event_${Date.now()}_${++eventIdCounter}`;
+        }
+
+        function updateStatus(text, className = '') {
+            statusText.innerText = `状态: ${text}`;
+            statusText.className = `status ${className}`;
+        }
+
+        function addDebugEvent(type, data) {
+            const debugPanel = document.getElementById('debugPanel');
+            const debugEvents = document.getElementById('debugEvents');
+            
+            debugPanel.style.display = 'block';
+            
+            const eventDiv = document.createElement('div');
+            eventDiv.style.marginBottom = '4px';
+            eventDiv.innerHTML = `<span style="color: #666;">[${new Date().toLocaleTimeString()}]</span> <span style="color: #2196F3;">${type}</span>: ${JSON.stringify(data).substring(0, 100)}`;
+            
+            debugEvents.insertBefore(eventDiv, debugEvents.firstChild);
+            
+            // 只保留最近10个事件
+            while (debugEvents.children.length > 10) {
+                debugEvents.removeChild(debugEvents.lastChild);
+            }
+        }
+
+        async function initConnection() {
+            updateStatus('正在连接服务器...', '');
+            
+            try {
+                const wsUrl = 'ws://localhost:3001/doubao-proxy';
+                console.log("正在连接豆包代理服务器:", wsUrl);
+                socket = new WebSocket(wsUrl);
+
+                socket.onopen = () => {
+                    console.log("✅ WebSocket 连接已建立（豆包代理服务器）");
+                    updateStatus('已连接，正在启动会话...', 'connected');
+                    
+                    // 发送开始会话请求
+                    currentSessionId = `session_${Date.now()}`;
+                    socket.send(JSON.stringify({
+                        type: 'start_session',
+                        sessionId: currentSessionId,
+                        systemMessage: getCurrentSystemMessage(),
+                        model: 'O'
+                    }));
+                };
+
+                socket.onmessage = async (e) => {
+                    if (typeof e.data === 'string') {
+                        try {
+                            const data = JSON.parse(e.data);
+                            handleServerMessage(data);
+                        } catch (error) {
+                            console.error("解析 JSON 消息错误:", error);
+                        }
+                    } else if (e.data instanceof ArrayBuffer) {
+                        // 处理音频数据
+                        await handleAudioData(e.data);
+                    }
+                };
+
+                socket.onerror = (error) => {
+                    console.error("WebSocket 错误:", error);
+                    updateStatus('连接错误，请检查代理服务器是否运行', 'error');
+                };
+
+                socket.onclose = (event) => {
+                    console.log("WebSocket 连接已关闭", {
+                        code: event.code,
+                        reason: event.reason,
+                        wasClean: event.wasClean
+                    });
+                    
+                    if (event.code === 1006) {
+                        updateStatus('连接异常关闭，请检查代理服务器是否运行 (npm run doubao)', 'error');
+                    } else if (event.code !== 1000) {
+                        updateStatus(`连接关闭 (代码: ${event.code})`, 'error');
+                    } else {
+                        updateStatus('连接已断开', '');
+                    }
+                    
+                    stopRecording();
+                    resetUI();
+                };
+
+            } catch (error) {
+                console.error("初始化连接错误:", error);
+                updateStatus('连接失败: ' + error.message, 'error');
+            }
+        }
+
+        function handleServerMessage(data) {
+            console.log("收到服务器消息:", data.type, data);
+            addDebugEvent(data.type, data);
+
+            switch (data.type) {
+                case 'session_started':
+                    console.log("✅ 会话已创建");
+                    updateStatus('会话已创建，请开始说话', 'connected');
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    // 重置状态
+                    currentChatText = '';
+                    audioQueue = [];
+                    isPlayingAudio = false;
+                    chatContent.textContent = '-';
+                    asrContent.textContent = '-';
+                    startMic();
+                    break;
+                    
+                case 'error':
+                    console.error("❌ 错误:", data.error);
+                    updateStatus('错误: ' + data.error, 'error');
+                    break;
+                    
+                case 'speech_started':
+                    console.log("🎤 用户开始说话");
+                    asrContent.textContent = '...正在识别...';
+                    break;
+                    
+                case 'asr_response':
+                    console.log("📝 ASR 识别结果:", data.results);
+                    if (data.results && data.results.length > 0) {
+                        const text = data.results.map(r => r.text).join(' ');
+                        asrContent.textContent = text;
+                        addDebugEvent('asr_result', { text });
+                    }
+                    break;
+                    
+                case 'speech_ended':
+                    console.log("✅ 用户说话结束");
+                    break;
+                    
+                case 'chat_response':
+                    console.log("🤖 AI 回复片段:", data.content);
+                    // 累积文本内容（流式返回）
+                    if (data.content) {
+                        currentChatText += data.content;
+                        chatContent.textContent = currentChatText;
+                        addDebugEvent('chat_response', { content: data.content?.substring(0, 50) });
+                    }
+                    break;
+                
+                case 'chat_ended':
+                    console.log("✅ AI 回复结束");
+                    // 回复结束时，保持当前文本，准备下一次对话
+                    currentChatText = '';
+                    break;
+            }
+        }
+
+        async function handleAudioData(audioData) {
+            // 将音频数据添加到队列
+            audioQueue.push(audioData);
+            console.log("🔊 收到音频数据，队列长度:", audioQueue.length, "大小:", audioData.byteLength);
+            
+            // 如果当前没有播放音频，开始播放
+            if (!isPlayingAudio) {
+                playAudioQueue();
+            }
+        }
+        
+        async function playAudioQueue() {
+            if (audioQueue.length === 0) {
+                isPlayingAudio = false;
+                return;
+            }
+            
+            isPlayingAudio = true;
+            
+            while (audioQueue.length > 0) {
+                const audioData = audioQueue.shift();
+                
+                try {
+                    // 确保 audioContext 已创建
+                    if (!audioContext) {
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                            sampleRate: 24000
+                        });
+                    }
+                    
+                    // 将 Int16 PCM 数据转换为 Float32
+                    const int16Data = new Int16Array(audioData);
+                    const float32Data = new Float32Array(int16Data.length);
+                    
+                    for (let i = 0; i < int16Data.length; i++) {
+                        float32Data[i] = int16Data[i] / 32768.0;
+                    }
+                    
+                    // 创建音频缓冲区
+                    const audioBuffer = audioContext.createBuffer(1, float32Data.length, 24000);
+                    audioBuffer.getChannelData(0).set(float32Data);
+                    
+                    // 播放音频
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioContext.destination);
+                    
+                    // 等待播放完成
+                    await new Promise((resolve, reject) => {
+                        source.onended = resolve;
+                        source.onerror = reject;
+                        source.start(0);
+                    });
+                    
+                    console.log("🔊 音频片段播放完成");
+                } catch (error) {
+                    console.error("播放音频错误:", error);
+                }
+            }
+            
+            isPlayingAudio = false;
+        }
+
+        async function startMic() {
+            try {
+                console.log("🎤 请求麦克风权限...");
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 16000
+                });
+                
+                sourceNode = audioContext.createMediaStreamSource(mediaStream);
+                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                let audioChunkCount = 0;
+                scriptProcessor.onaudioprocess = (e) => {
+                    if (!isRecording) return;
+                    
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    
+                    // 发送音频数据到服务器
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        // 使用 Int16Array 转换为 PCM 数据
+                        const pcmArray = new Int16Array(inputData.length);
+                        for (let i = 0; i < inputData.length; i++) {
+                            const sample = Math.max(-1, Math.min(1, inputData[i]));
+                            pcmArray[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                        }
+                        
+                        // 直接发送二进制数据
+                        try {
+                            socket.send(pcmArray.buffer);
+                            audioChunkCount++;
+                            if (audioChunkCount % 100 === 0) {
+                                console.log(`📤 已发送 ${audioChunkCount} 个音频数据包`);
+                            }
+                        } catch (error) {
+                            console.error('发送音频数据失败:', error);
+                        }
+                    } else {
+                        if (audioChunkCount === 0 || audioChunkCount % 100 === 0) {
+                            console.warn('⚠️ WebSocket 未连接，无法发送音频数据, readyState:', socket?.readyState);
+                        }
+                    }
+                    
+                    // 更新可视化条
+                    const max = Math.max(...inputData.map(Math.abs));
+                    vBar.style.width = (max * 100) + '%';
+                };
+                
+                sourceNode.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+                
+                isRecording = true;
+                updateStatus('正在监听，请开始说话...', 'recording');
+                console.log("✅ 麦克风已启动");
+                
+            } catch (error) {
+                console.error("❌ 麦克风启动失败:", error);
+                updateStatus('麦克风访问失败: ' + error.message, 'error');
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+                scriptProcessor = null;
+            }
+            
+            if (sourceNode) {
+                sourceNode.disconnect();
+                sourceNode = null;
+            }
+            
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            
+            vBar.style.width = '0%';
+        }
+
+        function resetUI() {
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+
+        async function startSession() {
+            await initConnection();
+        }
+
+        async function stopSession() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'finish_session' }));
+            }
+            
+            stopRecording();
+            resetUI();
+            updateStatus('已停止', '');
+            
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+        }
+
+        // 事件绑定
+        settingsBtn.onclick = openModal;
+        closeModalBtn.onclick = closeModal;
+        cancelBtn.onclick = closeModal;
+        saveBtn.onclick = saveSettings;
+        
+        settingsModal.onclick = (e) => {
+            if (e.target === settingsModal) {
+                closeModal();
+            }
+        };
+
+        startBtn.onclick = startSession;
+        stopBtn.onclick = stopSession;
+
+        // 初始化
+        initPresets();
+    </script>
+</body>
+</html>
