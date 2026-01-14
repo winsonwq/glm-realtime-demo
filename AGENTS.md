@@ -43,3 +43,6 @@ npm run doubao
 # Or start with nodemon for development
 npm run doubao:dev
 ```
+
+### Recent Commits
+- Add Doubao realtime voice API support with WebSocket proxy server
